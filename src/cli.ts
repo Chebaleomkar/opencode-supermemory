@@ -416,6 +416,7 @@ interface InstallOptions {
 async function install(options: InstallOptions): Promise<number> {
   console.log("\n🧠 opencode-supermemory installer\n");
 
+  mkdirSync(OPENCODE_CONFIG_DIR, { recursive: true });
   writeInstallDefaults(existsSync(DEFAULT_CONFIG_FILE));
 
   const rl = options.tui ? createReadline() : null;
