@@ -7,6 +7,7 @@ import { startAuthFlow, clearCredentials, loadCredentials, CREDENTIALS_FILE } fr
 import { CONFIG, CONFIG_FILE, SUPERMEMORY_API_KEY, getApiBaseUrl, isConfigured, writeInstallDefaults } from "./config.js";
 import { SupermemoryClient } from "./services/client.js";
 import { getTags } from "./services/tags.js";
+import { stripJsoncComments } from "./services/jsonc.js";
 import {
   editOpenCodeConfig,
   editOpenCodeTuiConfig,
@@ -535,7 +536,7 @@ function maskKey(key: string | undefined): string {
 function getConfiguredApiKeyFromFile(): string | undefined {
   try {
     if (!existsSync(DEFAULT_CONFIG_FILE)) return undefined;
-    const parsed = JSON.parse(readFileSync(DEFAULT_CONFIG_FILE, "utf-8")) as { apiKey?: string };
+    const parsed = JSON.parse(stripJsoncComments(readFileSync(DEFAULT_CONFIG_FILE, "utf-8"))) as { apiKey?: string };
     return parsed.apiKey;
   } catch {
     return undefined;

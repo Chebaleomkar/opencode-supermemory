@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { stripJsoncComments } from "./services/jsonc.js";
 import { loadCredentials } from "./services/auth.js";
+import { applyEdits, modify, parse, type ParseError } from "jsonc-parser/lib/esm/main.js";
 
 const CONFIG_DIR = join(homedir(), ".config", "opencode");
 export { PLUGIN_VERSION } from "./version.js";
@@ -118,22 +119,22 @@ function resolveRecallMode(): RecallMode {
   return DEFAULTS.recallMode;
 }
 
-function loadRawConfig(): { config: SupermemoryConfig; existed: boolean } {
+function loadRawConfig(): { config: SupermemoryConfig; existed: boolean; path?: string } {
   for (const path of CONFIG_FILES) {
     if (existsSync(path)) {
       try {
         const content = readFileSync(path, "utf-8");
         const json = stripJsoncComments(content);
-        return { config: JSON.parse(json) as SupermemoryConfig, existed: true };
+        return { config: JSON.parse(json) as SupermemoryConfig, existed: true, path };
       } catch {
-        return { config: {}, existed: true };
+        return { config: {}, existed: true, path };
       }
     }
   }
   return { config: {}, existed: false };
 }
 
-const { config: fileConfig, existed: configExisted } = loadRawConfig();
+const { config: fileConfig, existed: configExisted, path: loadedConfigFile } = loadRawConfig();
 
 function getApiKey(): string | undefined {
   if (process.env.SUPERMEMORY_API_KEY) return process.env.SUPERMEMORY_API_KEY;
@@ -172,7 +173,8 @@ export function getApiBaseUrl(): string {
   return normalized;
 }
 
-export const CONFIG_FILE = CONFIG_FILES[1];
+/** The file the config was loaded from, or where a new one should be created. */
+export const CONFIG_FILE = loadedConfigFile ?? CONFIG_FILES[1];
 const DEFAULT_CONFIG_FILE = CONFIG_FILE ?? join(CONFIG_DIR, "supermemory.json");
 
 export const CONFIG = {
@@ -219,14 +221,34 @@ export function getRecallConfig(): {
   };
 }
 
-export function writeInstallDefaults(isExistingInstall: boolean): void {
-  const current = loadRawConfig().config;
-  const next: SupermemoryConfig = { ...current };
-  if (isExistingInstall) {
-    if (next.captureEveryNTurns === undefined) next.captureEveryNTurns = 3;
-  } else {
-    next.recallMode = "direct";
-    next.captureEveryNTurns = 0;
+/**
+ * Adds install defaults to raw config content without rewriting the rest of
+ * the file, so comments in supermemory.jsonc survive. Returns null when the
+ * content is not valid JSONC and should be left alone.
+ */
+export function applyInstallDefaults(rawContent: string, isExistingInstall: boolean): string | null {
+  const content = rawContent.trim() === "" ? "{}\n" : rawContent;
+  const errors: ParseError[] = [];
+  const current = parse(content, errors, { allowTrailingComma: true }) as SupermemoryConfig | undefined;
+  if (errors.length > 0 || typeof current !== "object" || current === null || Array.isArray(current)) {
+    return null;
   }
-  writeFileSync(DEFAULT_CONFIG_FILE, JSON.stringify(next, null, 2));
+
+  const defaults: SupermemoryConfig = isExistingInstall
+    ? current.captureEveryNTurns === undefined ? { captureEveryNTurns: 3 } : {}
+    : { recallMode: "direct", captureEveryNTurns: 0 };
+
+  let next = content;
+  for (const [key, value] of Object.entries(defaults)) {
+    next = applyEdits(next, modify(next, [key], value, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    }));
+  }
+  return next;
+}
+
+export function writeInstallDefaults(isExistingInstall: boolean): void {
+  const raw = existsSync(DEFAULT_CONFIG_FILE) ? readFileSync(DEFAULT_CONFIG_FILE, "utf-8") : "";
+  const next = applyInstallDefaults(raw, isExistingInstall);
+  if (next !== null && next !== raw) writeFileSync(DEFAULT_CONFIG_FILE, next);
 }
