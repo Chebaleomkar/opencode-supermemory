@@ -1,9 +1,8 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { stripJsoncComments } from "./services/jsonc.js";
 import { loadCredentials } from "./services/auth.js";
-import { applyEdits, modify, parse, type ParseError } from "jsonc-parser/lib/esm/main.js";
 
 const CONFIG_DIR = join(homedir(), ".config", "opencode");
 export { PLUGIN_VERSION } from "./version.js";
@@ -175,7 +174,6 @@ export function getApiBaseUrl(): string {
 
 /** The file the config was loaded from, or where a new one should be created. */
 export const CONFIG_FILE = loadedConfigFile ?? CONFIG_FILES[1];
-const DEFAULT_CONFIG_FILE = CONFIG_FILE ?? join(CONFIG_DIR, "supermemory.json");
 
 export const CONFIG = {
   similarityThreshold: fileConfig.similarityThreshold ?? DEFAULTS.similarityThreshold,
@@ -219,36 +217,4 @@ export function getRecallConfig(): {
     directive: CONFIG.recallDirective ?? null,
     mode: CONFIG.recallMode,
   };
-}
-
-/**
- * Adds install defaults to raw config content without rewriting the rest of
- * the file, so comments in supermemory.jsonc survive. Returns null when the
- * content is not valid JSONC and should be left alone.
- */
-export function applyInstallDefaults(rawContent: string, isExistingInstall: boolean): string | null {
-  const content = rawContent.trim() === "" ? "{}\n" : rawContent;
-  const errors: ParseError[] = [];
-  const current = parse(content, errors, { allowTrailingComma: true }) as SupermemoryConfig | undefined;
-  if (errors.length > 0 || typeof current !== "object" || current === null || Array.isArray(current)) {
-    return null;
-  }
-
-  const defaults: SupermemoryConfig = isExistingInstall
-    ? current.captureEveryNTurns === undefined ? { captureEveryNTurns: 3 } : {}
-    : { recallMode: "direct", captureEveryNTurns: 0 };
-
-  let next = content;
-  for (const [key, value] of Object.entries(defaults)) {
-    next = applyEdits(next, modify(next, [key], value, {
-      formattingOptions: { insertSpaces: true, tabSize: 2 },
-    }));
-  }
-  return next;
-}
-
-export function writeInstallDefaults(isExistingInstall: boolean): void {
-  const raw = existsSync(DEFAULT_CONFIG_FILE) ? readFileSync(DEFAULT_CONFIG_FILE, "utf-8") : "";
-  const next = applyInstallDefaults(raw, isExistingInstall);
-  if (next !== null && next !== raw) writeFileSync(DEFAULT_CONFIG_FILE, next);
 }
